@@ -1,4 +1,4 @@
-        import telebot
+import telebot
 import os
 import time
 import threading
@@ -8,20 +8,23 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 bot = telebot.TeleBot(BOT_TOKEN)
 
 ADMIN_ID = 8133027931
-
 PRICE_PER_MINUTE = 300
 
 users = {}
 
 def get_user(user_id):
     if user_id not in users:
-        users[user_id] = {
-            "balance": 0,
-            "riding": False,
-            "waiting_photo": False,
-            "waiting_location": False
-        }
-    return users[user_id]
+        users[user_id] = {}
+
+    user = users[user_id]
+
+    # xavfsiz fieldlar (xato bermaydi)
+    user.setdefault("balance", 0)
+    user.setdefault("riding", False)
+    user.setdefault("waiting_photo", False)
+    user.setdefault("waiting_location", False)
+
+    return user
 
 def main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -45,18 +48,23 @@ def topup(message):
     bot.send_message(message.chat.id, "5000 so'm qo'shildi 💰")
 
 def ride_process(user_id):
-    while users[user_id]["riding"]:
+    while True:
+        user = get_user(user_id)
+
+        if not user["riding"]:
+            break
+
         time.sleep(60)
 
-        users[user_id]["balance"] -= PRICE_PER_MINUTE
+        user["balance"] -= PRICE_PER_MINUTE
 
         bot.send_message(
             user_id,
-            f"💸 1 minut o'tdi\nBalans: {users[user_id]['balance']} so'm"
+            f"💸 1 minut o'tdi\nBalans: {user['balance']} so'm"
         )
 
-        if users[user_id]["balance"] <= 0:
-            users[user_id]["riding"] = False
+        if user["balance"] <= 0:
+            user["riding"] = False
             bot.send_message(user_id, "Balans tugadi ❌ Ride to‘xtadi")
             break
 
@@ -68,10 +76,14 @@ def start_ride(message):
         bot.send_message(message.chat.id, "Balans yetarli emas ❌")
         return
 
+    if user["riding"]:
+        bot.send_message(message.chat.id, "Siz allaqachon ride boshlagansiz 🛴")
+        return
+
     user["riding"] = True
     bot.send_message(message.chat.id, "Ride boshlandi 🛴")
 
-    threading.Thread(target=ride_process, args=(message.chat.id,)).start()
+    threading.Thread(target=ride_process, args=(message.chat.id,), daemon=True).start()
 
 # END RIDE → rasm so‘raydi
 @bot.message_handler(func=lambda m: m.text == "❌ End Ride")
@@ -83,9 +95,9 @@ def end_ride(message):
         return
 
     user["waiting_photo"] = True
-    bot.send_message(message.chat.id, "📸 Iltimos, skuter rasmini yuboring")
+    bot.send_message(message.chat.id, "📸 Skuter rasmini yuboring")
 
-# RASM QABUL → keyin lokatsiya so‘raydi
+# RASM → keyin lokatsiya
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     user = get_user(message.chat.id)
@@ -96,12 +108,12 @@ def handle_photo(message):
     user["waiting_photo"] = False
     user["waiting_location"] = True
 
-    # Admin ga rasm yubor
+    # admin ga rasm
     bot.forward_message(ADMIN_ID, message.chat.id, message.message_id)
 
-    bot.send_message(message.chat.id, "📍 Endi lokatsiyangizni yuboring")
+    bot.send_message(message.chat.id, "📍 Endi lokatsiya yuboring")
 
-# LOKATSIYA QABUL → ride tugaydi
+# LOKATSIYA → tugatadi
 @bot.message_handler(content_types=['location'])
 def handle_location(message):
     user = get_user(message.chat.id)
@@ -112,7 +124,7 @@ def handle_location(message):
     user["waiting_location"] = False
     user["riding"] = False
 
-    # Admin ga lokatsiya yubor
+    # admin ga lokatsiya
     bot.send_location(
         ADMIN_ID,
         message.location.latitude,
@@ -121,7 +133,7 @@ def handle_location(message):
 
     bot.send_message(
         ADMIN_ID,
-        f"📸+📍 Yangi ride tugadi\n👤 User: {message.chat.id}\n💰 Balans: {user['balance']} so'm"
+        f"📸+📍 Ride tugadi\n👤 User: {message.chat.id}\n💰 Balans: {user['balance']} so'm"
     )
 
     bot.send_message(message.chat.id, "✅ Ride tugadi, rahmat!")
