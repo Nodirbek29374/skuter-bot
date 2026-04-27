@@ -13,4 +13,4 @@ def start(message):
 def echo(message):
     bot.send_message(message.chat.id, f"Siz yozdingiz: {message.text}")
 
-bot.polling(none_stop=True)
+bot.infinity_polling()
