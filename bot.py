@@ -1,4 +1,4 @@
-import telebot
+     import telebot
 import os
 import time
 import threading
@@ -8,7 +8,6 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 bot = telebot.TeleBot(BOT_TOKEN)
 
 PRICE_PER_MINUTE = 300
-PRICE_PER_SECOND = PRICE_PER_MINUTE / 60
 
 users = {}
 
@@ -33,7 +32,7 @@ def start(message):
 @bot.message_handler(func=lambda m: m.text == "🔋 Balance")
 def balance(message):
     user = get_user(message.chat.id)
-    bot.send_message(message.chat.id, f"Balans: {int(user['balance'])} so'm")
+    bot.send_message(message.chat.id, f"Balans: {user['balance']} so'm")
 
 @bot.message_handler(func=lambda m: m.text == "💳 Top Up")
 def topup(message):
@@ -43,13 +42,13 @@ def topup(message):
 
 def ride_process(user_id):
     while users[user_id]["riding"]:
-        time.sleep(10)
+        time.sleep(60)  # har 1 minut
 
-        users[user_id]["balance"] -= PRICE_PER_SECOND * 10
+        users[user_id]["balance"] -= PRICE_PER_MINUTE
 
         bot.send_message(
             user_id,
-            f"💸 Balans kamaymoqda: {int(users[user_id]['balance'])} so'm"
+            f"💸 1 minut o'tdi\nBalans: {users[user_id]['balance']} so'm"
         )
 
         if users[user_id]["balance"] <= 0:
