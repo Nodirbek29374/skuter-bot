@@ -1,4 +1,4 @@
-import telebot
+        import telebot
 import os
 import time
 import threading
@@ -6,6 +6,8 @@ from telebot import types
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 bot = telebot.TeleBot(BOT_TOKEN)
+
+ADMIN_ID = 8133027931
 
 PRICE_PER_MINUTE = 300
 
@@ -16,7 +18,8 @@ def get_user(user_id):
         users[user_id] = {
             "balance": 0,
             "riding": False,
-            "waiting_photo": False
+            "waiting_photo": False,
+            "waiting_location": False
         }
     return users[user_id]
 
@@ -70,7 +73,7 @@ def start_ride(message):
 
     threading.Thread(target=ride_process, args=(message.chat.id,)).start()
 
-# END RIDE (rasm so‘raydi)
+# END RIDE → rasm so‘raydi
 @bot.message_handler(func=lambda m: m.text == "❌ End Ride")
 def end_ride(message):
     user = get_user(message.chat.id)
@@ -80,9 +83,9 @@ def end_ride(message):
         return
 
     user["waiting_photo"] = True
-    bot.send_message(message.chat.id, "Iltimos, skuter rasmini yuboring 📸")
+    bot.send_message(message.chat.id, "📸 Iltimos, skuter rasmini yuboring")
 
-# RASM QABUL QILISH
+# RASM QABUL → keyin lokatsiya so‘raydi
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     user = get_user(message.chat.id)
@@ -91,8 +94,36 @@ def handle_photo(message):
         return
 
     user["waiting_photo"] = False
+    user["waiting_location"] = True
+
+    # Admin ga rasm yubor
+    bot.forward_message(ADMIN_ID, message.chat.id, message.message_id)
+
+    bot.send_message(message.chat.id, "📍 Endi lokatsiyangizni yuboring")
+
+# LOKATSIYA QABUL → ride tugaydi
+@bot.message_handler(content_types=['location'])
+def handle_location(message):
+    user = get_user(message.chat.id)
+
+    if not user["waiting_location"]:
+        return
+
+    user["waiting_location"] = False
     user["riding"] = False
 
-    bot.send_message(message.chat.id, "Rasm qabul qilindi ✅ Ride tugadi")
+    # Admin ga lokatsiya yubor
+    bot.send_location(
+        ADMIN_ID,
+        message.location.latitude,
+        message.location.longitude
+    )
 
-bot.infinity_polling()     
+    bot.send_message(
+        ADMIN_ID,
+        f"📸+📍 Yangi ride tugadi\n👤 User: {message.chat.id}\n💰 Balans: {user['balance']} so'm"
+    )
+
+    bot.send_message(message.chat.id, "✅ Ride tugadi, rahmat!")
+
+bot.infinity_polling()
