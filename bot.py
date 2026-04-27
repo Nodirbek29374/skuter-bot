@@ -1,4 +1,4 @@
-     import telebot
+import telebot
 import os
 import time
 import threading
@@ -15,7 +15,8 @@ def get_user(user_id):
     if user_id not in users:
         users[user_id] = {
             "balance": 0,
-            "riding": False
+            "riding": False,
+            "waiting_photo": False
         }
     return users[user_id]
 
@@ -42,7 +43,7 @@ def topup(message):
 
 def ride_process(user_id):
     while users[user_id]["riding"]:
-        time.sleep(60)  # har 1 minut
+        time.sleep(60)
 
         users[user_id]["balance"] -= PRICE_PER_MINUTE
 
@@ -69,6 +70,7 @@ def start_ride(message):
 
     threading.Thread(target=ride_process, args=(message.chat.id,)).start()
 
+# END RIDE (rasm so‘raydi)
 @bot.message_handler(func=lambda m: m.text == "❌ End Ride")
 def end_ride(message):
     user = get_user(message.chat.id)
@@ -77,7 +79,20 @@ def end_ride(message):
         bot.send_message(message.chat.id, "Siz ride boshlamagansiz ❌")
         return
 
-    user["riding"] = False
-    bot.send_message(message.chat.id, "Ride tugadi ✅")
+    user["waiting_photo"] = True
+    bot.send_message(message.chat.id, "Iltimos, skuter rasmini yuboring 📸")
 
-bot.infinity_polling()
+# RASM QABUL QILISH
+@bot.message_handler(content_types=['photo'])
+def handle_photo(message):
+    user = get_user(message.chat.id)
+
+    if not user["waiting_photo"]:
+        return
+
+    user["waiting_photo"] = False
+    user["riding"] = False
+
+    bot.send_message(message.chat.id, "Rasm qabul qilindi ✅ Ride tugadi")
+
+bot.infinity_polling()     
