@@ -7,7 +7,13 @@ import os
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 bot = telebot.TeleBot(BOT_TOKEN)
 
-ADMIN_ID = 8133027931  # o'zingni ID
+ADMIN_ID = 8133027931
+
+# SKUTERLAR (lokatsiya bilan)
+scooters = {
+    "SC001": {"busy": False, "lat": 39.7747, "lon": 64.4286},
+    "SC002": {"busy": False, "lat": 39.7750, "lon": 64.4290}
+}
 
 users = {}
 
@@ -15,95 +21,141 @@ users = {}
 def menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.row("💰 Balans", "➕ Pul qo‘shish")
-    markup.row("🛴 Haydashni boshlash", "❌ Haydashni tugatish")
+    markup.row("🛴 Skuter olish", "❌ Haydashni tugatish")
+    markup.row("📍 Skuterlar xaritada")
     return markup
 
-# START
+# START + QR
 @bot.message_handler(commands=['start'])
 def start(message):
-    user_id = message.chat.id
+    uid = message.chat.id
+    args = message.text.split()
 
-    if user_id not in users:
-        users[user_id] = {
+    if uid not in users:
+        users[uid] = {
             "balance": 10000,
             "riding": False,
-            "last_time": 0
+            "scooter": None
         }
 
-    bot.send_message(user_id, "Bot ishga tushdi ✅", reply_markup=menu())
+    # QR orqali kirsa
+    if len(args) > 1:
+        scooter_id = args[1].upper()
 
-# BALANS
-@bot.message_handler(func=lambda m: m.text == "💰 Balans")
-def balance(message):
-    user = users[message.chat.id]
-    bot.send_message(message.chat.id, f"💰 Balans: {user['balance']} so'm")
+        if scooter_id in scooters and not scooters[scooter_id]["busy"]:
+            users[uid]["riding"] = True
+            users[uid]["scooter"] = scooter_id
+            scooters[scooter_id]["busy"] = True
 
-# TOP UP
-@bot.message_handler(func=lambda m: m.text == "➕ Pul qo‘shish")
-def topup(message):
-    bot.send_message(message.chat.id, "Admin bilan bog‘laning")
+            bot.send_message(uid, f"🚀 {scooter_id} skuter boshlandi!")
 
-# START RIDE
-@bot.message_handler(func=lambda m: m.text == "🛴 Haydashni boshlash")
-def start_ride(message):
-    user = users[message.chat.id]
+            start_timer(uid, scooter_id)
 
-    if user["riding"]:
-        bot.send_message(message.chat.id, "Allaqachon haydalyapti!")
-        return
+        else:
+            bot.send_message(uid, "❗ Skuter band yoki yo‘q")
 
-    user["riding"] = True
-    user["last_time"] = time.time()
+    else:
+        bot.send_message(uid, "Bot ishga tushdi ✅", reply_markup=menu())
 
-    bot.send_message(message.chat.id, "🚀 Haydash boshlandi!")
-
-    # minutiga pul yechish
+# TIMER (300 so'm/minut)
+def start_timer(uid, sid):
     def ride():
-        while user["riding"]:
+        while users[uid]["riding"]:
             time.sleep(60)
 
-            if user["balance"] >= 300:
-                user["balance"] -= 300
-                bot.send_message(message.chat.id, f"💸 1 minut o'tdi\nBalans: {user['balance']} so'm")
-            else:
-                bot.send_message(message.chat.id, "❗ Balans tugadi")
-                user["riding"] = False
+            if not users[uid]["riding"]:
                 break
 
-    threading.Thread(target=ride).start()
+            if users[uid]["balance"] >= 300:
+                users[uid]["balance"] -= 300
+                bot.send_message(uid, f"💸 1 minut o'tdi\nBalans: {users[uid]['balance']} so'm")
+            else:
+                bot.send_message(uid, "❗ Balans tugadi")
+                users[uid]["riding"] = False
+                scooters[sid]["busy"] = False
+                break
 
-# END RIDE
-@bot.message_handler(func=lambda m: m.text == "❌ Haydashni tugatish")
-def end_ride(message):
-    user = users[message.chat.id]
+    threading.Thread(target=ride, daemon=True).start()
 
-    if not user["riding"]:
-        bot.send_message(message.chat.id, "Siz haydamayapsiz")
+# SKUTER OLISH (qo‘lda ID)
+@bot.message_handler(func=lambda m: m.text == "🛴 Skuter olish")
+def get_scooter(message):
+    bot.send_message(message.chat.id, "Skuter ID kiriting (masalan: SC001)")
+
+@bot.message_handler(func=lambda m: m.text.startswith("SC"))
+def start_ride(message):
+    uid = message.chat.id
+    sid = message.text.upper()
+
+    if sid not in scooters:
+        bot.send_message(uid, "❗ Bunday skuter yo‘q")
         return
 
+    if scooters[sid]["busy"]:
+        bot.send_message(uid, "❗ Skuter band")
+        return
+
+    if users[uid]["riding"]:
+        bot.send_message(uid, "❗ Siz allaqachon haydalyapsiz")
+        return
+
+    scooters[sid]["busy"] = True
+    users[uid]["riding"] = True
+    users[uid]["scooter"] = sid
+
+    bot.send_message(uid, f"🚀 {sid} boshlandi!")
+    start_timer(uid, sid)
+
+# STOP
+@bot.message_handler(func=lambda m: m.text == "❌ Haydashni tugatish")
+def stop(message):
+    uid = message.chat.id
+    user = users[uid]
+
+    if not user["riding"]:
+        bot.send_message(uid, "❗ Siz haydamayapsiz")
+        return
+
+    sid = user["scooter"]
+
     user["riding"] = False
+    scooters[sid]["busy"] = False
 
-    bot.send_message(message.chat.id, "📸 Skuter rasmini yuboring")
+    bot.send_message(uid, "📸 Rasm yuboring")
 
-# RASM QABUL QILISH
+# RASM
 @bot.message_handler(content_types=['photo'])
 def photo(message):
-    bot.send_message(message.chat.id, "📍 Endi lokatsiya yuboring")
+    bot.send_message(message.chat.id, "📍 Lokatsiya yuboring")
 
-    # adminga yuborish
-    bot.send_photo(ADMIN_ID, message.photo[-1].file_id, caption=f"User: {message.chat.id}")
+    bot.send_photo(ADMIN_ID, message.photo[-1].file_id,
+                   caption=f"User: {message.chat.id}")
 
 # LOKATSIYA
 @bot.message_handler(content_types=['location'])
 def location(message):
     bot.send_message(message.chat.id, "✅ Ride tugadi, rahmat!")
 
-    # adminga yuborish
-    bot.send_location(ADMIN_ID, message.location.latitude, message.location.longitude)
+    bot.send_location(ADMIN_ID,
+                      message.location.latitude,
+                      message.location.longitude)
 
-# DEFAULT
-@bot.message_handler(func=lambda m: True)
-def other(message):
-    bot.send_message(message.chat.id, "Tugmalardan foydalaning", reply_markup=menu())
+# XARITA
+@bot.message_handler(func=lambda m: m.text == "📍 Skuterlar xaritada")
+def show_map(message):
+    for sid, data in scooters.items():
+        bot.send_location(message.chat.id, data["lat"], data["lon"])
+        bot.send_message(message.chat.id, f"{sid} skuter")
 
-bot.infinity_polling()    
+# BALANS
+@bot.message_handler(func=lambda m: m.text == "💰 Balans")
+def balance(message):
+    bot.send_message(message.chat.id,
+                     f"💰 Balans: {users[message.chat.id]['balance']} so'm")
+
+# TOP UP
+@bot.message_handler(func=lambda m: m.text == "➕ Pul qo‘shish")
+def topup(message):
+    bot.send_message(message.chat.id, "Admin bilan bog‘laning")
+
+bot.infinity_polling()
