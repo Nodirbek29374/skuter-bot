@@ -1,85 +1,62 @@
-   import logging
-import os
-from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+import logging
+import asyncio
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
-TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
+API_TOKEN = "BOT_TOKEN=8110986517:AAG3DL1iUHgPv1Zk0mp51p-UB5mrhEsl4M8"
 
 logging.basicConfig(level=logging.INFO)
 
+bot = Bot(token=API_TOKEN)
+dp = Dispatcher(bot)
+
+# Foydalanuvchi ma'lumotlari
 users = {}
 
-menu = ReplyKeyboardMarkup([
-    ["💰 Balans", "➕ Pul qo‘shish"],
-    ["🛴 Haydashni boshlash", "❌ Haydashni tugatish"],
-    ["📍 Skuterlar xaritada"]
-], resize_keyboard=True)
+# Menu
+menu = ReplyKeyboardMarkup(resize_keyboard=True)
+menu.add("💰 Balans", "➕ Pul qo‘shish")
+menu.add("🛴 Haydashni boshlash", "❌ Haydashni tugatish")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    users[user_id] = {"balance": 10000, "ride": False}
-    await update.message.reply_text("Assalomu alaykum!", reply_markup=menu)
+@dp.message_handler(commands=['start'])
+async def start(msg: types.Message):
+    user_id = msg.from_user.id
+    users[user_id] = {"balans": 10000, "ride": False}
+    await msg.answer("Xush kelibsiz!", reply_markup=menu)
 
-async def message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    text = update.message.text
+@dp.message_handler(lambda m: m.text == "💰 Balans")
+async def balans(msg: types.Message):
+    user = users.get(msg.from_user.id)
+    if user:
+        await msg.answer(f"Balans: {user['balans']} so'm")
 
-    if user_id not in users:
-        users[user_id] = {"balance": 10000, "ride": False}
+@dp.message_handler(lambda m: m.text == "➕ Pul qo‘shish")
+async def pul(msg: types.Message):
+    await msg.answer("Admin bilan bog‘laning")
 
-    user = users[user_id]
+@dp.message_handler(lambda m: m.text == "🛴 Haydashni boshlash")
+async def start_ride(msg: types.Message):
+    user = users[msg.from_user.id]
+    user["ride"] = True
+    await msg.answer("Ride boshlandi!")
 
-    if text == "💰 Balans":
-        await update.message.reply_text(f"Balans: {user['balance']} so‘m")
+    asyncio.create_task(minus_balans(msg.from_user.id))
 
-    elif text == "➕ Pul qo‘shish":
-        await update.message.reply_text("Admin bilan bog‘laning")
+async def minus_balans(user_id):
+    while users[user_id]["ride"]:
+        await asyncio.sleep(60)
+        users[user_id]["balans"] -= 300
 
-    elif text == "🛴 Haydashni boshlash":
-        user["ride"] = True
-        await update.message.reply_text("Haydash boshlandi")
+        try:
+            await bot.send_message(user_id, f"💸 1 minut o‘tdi\nBalans: {users[user_id]['balans']} so'm")
+        except:
+            pass
 
-    elif text == "❌ Haydashni tugatish":
-        user["ride"] = False
-        await update.message.reply_text("Rasm yuboring")
-
-    elif text == "📍 Skuterlar xaritada":
-        await update.message.reply_text("Xarita hali tayyor emas")
-
-async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-
-    await update.message.reply_text("Endi lokatsiya yuboring")
-
-    await context.bot.send_photo(
-        chat_id=ADMIN_ID,
-        photo=update.message.photo[-1].file_id,
-        caption=f"User: {user_id}"
-    )
-
-async def location(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-
-    loc = update.message.location
-
-    await context.bot.send_location(
-        chat_id=ADMIN_ID,
-        latitude=loc.latitude,
-        longitude=loc.longitude
-    )
-
-    await update.message.reply_text("✅ Tugadi")
-
-def main():
-    app = Application.builder().token(TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT, message))
-    app.add_handler(MessageHandler(filters.PHOTO, photo))
-    app.add_handler(MessageHandler(filters.LOCATION, location))
-
-    app.run_polling()
+@dp.message_handler(lambda m: m.text == "❌ Haydashni tugatish")
+async def stop_ride(msg: types.Message):
+    users[msg.from_user.id]["ride"] = False
+    await msg.answer("Ride tugadi!")
 
 if __name__ == "__main__":
-    main()
+    from aiogram import executor
+    executor.start_polling(dp, skip_updates=True)
