@@ -1,105 +1,67 @@
- import telebot
+   import telebot
 import time
 import threading
 
-TOKEN = "SENING_TOKENINGNI_BU_YERGA_QO'Y"
-
+TOKEN = "8110986517:AAG3DL1iUHgPv1Zk0mp51p-UB5mrhEsl4M8"
 bot = telebot.TeleBot(TOKEN)
 
 users = {}
 
-PRICE_PER_MINUTE = 300
+# MENU
+def menu():
+    from telebot.types import ReplyKeyboardMarkup, KeyboardButton
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add("💰 Balans", "➕ Pul qo'shish")
+    kb.add("🛴 Haydashni boshlash", "❌ Haydashni tugatish")
+    kb.add("📍 Skuterlar xaritada")
+    return kb
 
-
-# START
 @bot.message_handler(commands=['start'])
-def start(message):
-    user_id = message.chat.id
-    users[user_id] = {
-        "balance": 0,
-        "riding": False
-    }
+def start(msg):
+    uid = msg.from_user.id
+    users[uid] = {"balans": 10000, "ride": False}
+    bot.send_message(uid, "Xush kelibsiz!", reply_markup=menu())
 
-    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("💰 Balans", "➕ Pul qo‘shish")
-    markup.add("🛴 Haydashni boshlash", "❌ Haydashni tugatish")
-    markup.add("📍 Skuterlar xaritada")
+@bot.message_handler(func=lambda m: True)
+def handler(msg):
+    uid = msg.from_user.id
 
-    bot.send_message(user_id, "Assalomu alaykum!", reply_markup=markup)
+    if uid not in users:
+        users[uid] = {"balans": 0, "ride": False}
 
+    if msg.text == "💰 Balans":
+        bot.send_message(uid, f"Balans: {users[uid]['balans']} so'm")
 
-# BALANS
-@bot.message_handler(func=lambda m: m.text == "💰 Balans")
-def balance(message):
-    user = users.get(message.chat.id)
-    if user:
-        bot.send_message(message.chat.id, f"Balans: {user['balance']} so‘m")
+    elif msg.text == "➕ Pul qo'shish":
+        users[uid]['balans'] += 5000
+        bot.send_message(uid, "5000 so'm qo'shildi")
 
-
-# PUL QO‘SHISH
-@bot.message_handler(func=lambda m: m.text == "➕ Pul qo‘shish")
-def add_money(message):
-    users[message.chat.id]["balance"] += 10000
-    bot.send_message(message.chat.id, "10000 so‘m qo‘shildi")
-
-
-# HAYDASHNI BOSHLASH
-@bot.message_handler(func=lambda m: m.text == "🛴 Haydashni boshlash")
-def start_ride(message):
-    user = users[message.chat.id]
-
-    if user["balance"] < 300:
-        bot.send_message(message.chat.id, "Balans yetarli emas!")
-        return
-
-    user["riding"] = True
-    bot.send_message(message.chat.id, "🚀 Haydash boshlandi")
-
-    threading.Thread(target=ride_timer, args=(message.chat.id,)).start()
-
-
-def ride_timer(user_id):
-    while users[user_id]["riding"]:
-        time.sleep(60)
-
-        if users[user_id]["balance"] < PRICE_PER_MINUTE:
-            bot.send_message(user_id, "❌ Pul tugadi!")
-            users[user_id]["riding"] = False
+    elif msg.text == "🛴 Haydashni boshlash":
+        if users[uid]['balans'] < 300:
+            bot.send_message(uid, "Balans yetarli emas")
             return
 
-        users[user_id]["balance"] -= PRICE_PER_MINUTE
+        users[uid]['ride'] = True
+        bot.send_message(uid, "Haydash boshlandi")
 
-        bot.send_message(
-            user_id,
-            f"💸 1 minut o‘tdi\nBalans: {users[user_id]['balance']} so‘m"
-        )
+        def ride():
+            while users[uid]['ride']:
+                time.sleep(60)
+                users[uid]['balans'] -= 300
+                bot.send_message(uid, f"1 minut o'tdi\nBalans: {users[uid]['balans']} so'm")
 
+                if users[uid]['balans'] <= 0:
+                    users[uid]['ride'] = False
+                    bot.send_message(uid, "Balans tugadi!")
+                    break
 
-# HAYDASHNI TUGATISH
-@bot.message_handler(func=lambda m: m.text == "❌ Haydashni tugatish")
-def end_ride(message):
-    users[message.chat.id]["riding"] = False
+        threading.Thread(target=ride).start()
 
-    bot.send_message(message.chat.id, "📸 Skuter rasmini yuboring")
+    elif msg.text == "❌ Haydashni tugatish":
+        users[uid]['ride'] = False
+        bot.send_message(uid, "Ride tugadi")
 
+    elif msg.text == "📍 Skuterlar xaritada":
+        bot.send_location(uid, 39.6542, 66.9597)  # Buxoro misol
 
-# RASM
-@bot.message_handler(content_types=['photo'])
-def get_photo(message):
-    bot.send_message(message.chat.id, "📍 Endi lokatsiya yuboring")
-
-
-# LOKATSIYA
-@bot.message_handler(content_types=['location'])
-def get_location(message):
-    bot.send_message(message.chat.id, "✅ Ride tugadi, rahmat!")
-
-
-# XARITA
-@bot.message_handler(func=lambda m: m.text == "📍 Skuterlar xaritada")
-def map(message):
-    bot.send_location(message.chat.id, 41.3111, 69.2797)
-
-
-print("Bot ishlayapti...")
-bot.infinity_polling()
+bot.infinity_polling()  
