@@ -29,7 +29,9 @@ cursor.execute("""
 CREATE TABLE IF NOT EXISTS skuters (
     skuter_id TEXT PRIMARY KEY,
     code TEXT,
-    status TEXT
+    status TEXT,
+    lat REAL,
+    lon REAL
 )
 """)
 
@@ -38,13 +40,14 @@ conn.commit()
 # ⚙️ SETTINGS
 SKUTER_PRICE = 5000
 PRICE_PER_MIN = 500
-KARTA = "4023060516859138"
+KARTA = "8600 1234 5678 9012"
 
 # 🔘 MENU
 def menu():
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(KeyboardButton("🛴 Skuter olish"))
     kb.add(KeyboardButton("🛑 Skuter yopish"))
+    kb.add(KeyboardButton("📍 Skuterlar"))
     kb.add(KeyboardButton("➕ Pul qo‘shish"))
     kb.add(KeyboardButton("💰 Balans"))
     return kb
@@ -83,10 +86,10 @@ def is_riding(user_id):
     return row and row[0] == 1
 
 # 🛴 SKUTER
-def add_skuter(skuter_id, code):
+def add_skuter(skuter_id, code, lat, lon):
     cursor.execute(
-        "INSERT OR IGNORE INTO skuters VALUES (?, ?, ?)",
-        (skuter_id, code, "free")
+        "INSERT OR IGNORE INTO skuters VALUES (?, ?, ?, ?, ?)",
+        (skuter_id, code, "free", lat, lon)
     )
     conn.commit()
 
@@ -97,6 +100,10 @@ def get_skuter_by_code(code):
 def set_skuter_status(skuter_id, status):
     cursor.execute("UPDATE skuters SET status=? WHERE skuter_id=?", (status, skuter_id))
     conn.commit()
+
+def get_all_skuters():
+    cursor.execute("SELECT skuter_id, status, lat, lon FROM skuters")
+    return cursor.fetchall()
 
 # 🚀 REALTIME
 ride_data = {}
@@ -145,6 +152,18 @@ def add_money(msg):
 
 💳 To‘lov:
 {KARTA}""")
+
+# 📍 SKUTERLAR XARITADA
+@bot.message_handler(func=lambda m: m.text == "📍 Skuterlar")
+def show_map(msg):
+    skuters = get_all_skuters()
+
+    for skuter in skuters:
+        skuter_id, status, lat, lon = skuter
+        status_text = "🟢 Bo‘sh" if status == "free" else "🔴 Band"
+
+        bot.send_location(msg.chat.id, lat, lon)
+        bot.send_message(msg.chat.id, f"{skuter_id}\n{status_text}")
 
 # 🛴 SKUTER OLISH
 @bot.message_handler(func=lambda m: m.text == "🛴 Skuter olish")
@@ -210,10 +229,10 @@ def stop(msg):
 
 💰 Qoldiq: {get_balance(user_id)} so‘m""")
 
-# ▶️ SKUTERLARNI OLDINDAN QO‘SH (1 MARTA)
-add_skuter("SKUTER_1", "1")
-add_skuter("SKUTER_2", "2")
-add_skuter("SKUTER_3", "3")
+# ▶️ SKUTERLARNI QO‘SH (MISOL)
+add_skuter("SKUTER_1", "A123", 41.3111, 69.2797)
+add_skuter("SKUTER_2", "B456", 41.3125, 69.2810)
+add_skuter("SKUTER_3", "C789", 41.3130, 69.2750)
 
 # ▶️ RUN
-bot.infinity_polling()        
+bot.infinity_polling()
