@@ -105,30 +105,39 @@ def get_all_skuters():
     cursor.execute("SELECT skuter_id, status, lat, lon FROM skuters")
     return cursor.fetchall()
 
-# 🚀 REALTIME
+# 🚀 REALTIME (FIX QILINGAN)
 ride_data = {}
 
 def ride_worker(user_id, chat_id):
+    print(f"[START] {user_id}")
+
     while True:
-        time.sleep(60)
+        time.sleep(10)  # 🔥 TEST (keyin 60 qilasan)
 
         if not is_riding(user_id):
+            print(f"[STOP] {user_id}")
             break
 
-        bal = get_balance(user_id) - PRICE_PER_MIN
+        bal = get_balance(user_id)
+        new_bal = bal - PRICE_PER_MIN
 
-        if bal <= 0:
+        print(f"[MINUS] {user_id}: {new_bal}")
+
+        if new_bal <= 0:
             stop_ride_db(user_id)
+
             cursor.execute("UPDATE users SET balance=0 WHERE user_id=?", (user_id,))
             conn.commit()
 
             skuter_id = ride_data[user_id]["skuter_id"]
             set_skuter_status(skuter_id, "free")
 
-            bot.send_message(chat_id, "❌ Balans tugadi!\n🛑 Skuter yopildi")
+            bot.send_message(chat_id,
+            "❌ Balans tugadi!\n🛑 Skuter yopildi")
+
             break
         else:
-            cursor.execute("UPDATE users SET balance=? WHERE user_id=?", (bal, user_id))
+            cursor.execute("UPDATE users SET balance=? WHERE user_id=?", (new_bal, user_id))
             conn.commit()
 
 # 🚀 START
@@ -153,24 +162,21 @@ def add_money(msg):
 💳 To‘lov:
 {KARTA}""")
 
-# 📍 SKUTERLAR XARITADA
+# 📍 XARITA
 @bot.message_handler(func=lambda m: m.text == "📍 Skuterlar")
 def show_map(msg):
-    skuters = get_all_skuters()
-
-    for skuter in skuters:
+    for skuter in get_all_skuters():
         skuter_id, status, lat, lon = skuter
         status_text = "🟢 Bo‘sh" if status == "free" else "🔴 Band"
-
         bot.send_location(msg.chat.id, lat, lon)
         bot.send_message(msg.chat.id, f"{skuter_id}\n{status_text}")
 
-# 🛴 SKUTER OLISH
+# 🛴 OLISH
 @bot.message_handler(func=lambda m: m.text == "🛴 Skuter olish")
 def skuter(msg):
-    bot.send_message(msg.chat.id, "📸 QR skaner qiling yoki kodni kiriting:")
+    bot.send_message(msg.chat.id, "📸 QR skaner qiling yoki kod kiriting")
 
-# 🔑 ASOSIY LOGIKA
+# 🔑 ASOSIY
 @bot.message_handler(func=lambda m: True)
 def handle(msg):
     user_id = msg.from_user.id
@@ -183,17 +189,11 @@ def handle(msg):
         skuter_id, status = skuter
 
         if status != "free":
-            bot.send_message(chat_id, "❌ Bu skuter band!")
+            bot.send_message(chat_id, "❌ Band")
             return
 
-        bal = get_balance(user_id)
-
-        if bal < SKUTER_PRICE:
-            bot.send_message(chat_id,
-            f"""❌ Balans yetarli emas!
-
-💳 Karta:
-{KARTA}""")
+        if get_balance(user_id) < SKUTER_PRICE:
+            bot.send_message(chat_id, f"❌ Pul yo‘q\n💳 {KARTA}")
             return
 
         update_balance(user_id, -SKUTER_PRICE)
@@ -202,13 +202,13 @@ def handle(msg):
 
         ride_data[user_id] = {"skuter_id": skuter_id}
 
-        threading.Thread(target=ride_worker, args=(user_id, chat_id)).start()
+        threading.Thread(
+            target=ride_worker,
+            args=(user_id, chat_id),
+            daemon=True
+        ).start()
 
-        bot.send_message(chat_id,
-        f"""✅ {skuter_id} ochildi! 🛴
-
-💰 Balans: {get_balance(user_id)}
-⛔ Tugatish: "Skuter yopish" """)
+        bot.send_message(chat_id, f"✅ {skuter_id} ochildi")
 
 # 🛑 YOPISH
 @bot.message_handler(func=lambda m: m.text == "🛑 Skuter yopish")
@@ -216,7 +216,7 @@ def stop(msg):
     user_id = msg.from_user.id
 
     if not is_riding(user_id):
-        bot.send_message(msg.chat.id, "❗ Siz minmayapsiz")
+        bot.send_message(msg.chat.id, "❗ Minmayapsiz")
         return
 
     skuter_id = ride_data[user_id]["skuter_id"]
@@ -225,11 +225,9 @@ def stop(msg):
     set_skuter_status(skuter_id, "free")
 
     bot.send_message(msg.chat.id,
-    f"""🛑 {skuter_id} yopildi!
+    f"🛑 {skuter_id} yopildi\n💰 {get_balance(user_id)} so‘m")
 
-💰 Qoldiq: {get_balance(user_id)} so‘m""")
-
-# ▶️ SKUTERLARNI QO‘SH (MISOL)
+# ▶️ SKUTERLAR
 add_skuter("SKUTER_1", "A123", 41.3111, 69.2797)
 add_skuter("SKUTER_2", "B456", 41.3125, 69.2810)
 add_skuter("SKUTER_3", "C789", 41.3130, 69.2750)
