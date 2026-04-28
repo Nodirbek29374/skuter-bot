@@ -1,136 +1,130 @@
 import telebot
+from telebot.types import ReplyKeyboardMarkup, KeyboardButton
+import time
+import threading
 
 TOKEN = "8110986517:AAG3DL1iUHgPv1Zk0mp51p-UB5mrhEsl4M8"
 bot = telebot.TeleBot(TOKEN)
 
-ADMIN_ID = 8133027931  # 👉 o'zingni ID qo'y
 user_balance = {}
-user_states = {}
-user_code = "1234"
+user_state = {}
+ride_data = {}
 
-# MENYULAR
-def user_menu():
-    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("💰 Balans", "➕ Pul qo'shish")
-    markup.add("🛴 Skuter olish", "❌ Haydashni tugatish")
-    return markup
+SKUTER_PRICE = 5000
+PRICE_PER_MIN = 500
+KARTA = "4023060516859138"
 
-def admin_menu():
-    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("💰 Balans", "➕ Pul qo'shish")
-    markup.add("🛴 Skuter olish", "❌ Haydashni tugatish")
-    markup.add("👑 Admin panel")
-    return markup
+# 🔘 MENU
+def menu():
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(KeyboardButton("🛴 Skuter olish"))
+    kb.add(KeyboardButton("🛑 Skuter yopish"))
+    kb.add(KeyboardButton("➕ Pul qo‘shish"))
+    kb.add(KeyboardButton("💰 Balans"))
+    return kb
 
-# START
+# 🚀 START
 @bot.message_handler(commands=['start'])
-def start(message):
-    chat_id = message.chat.id
-    user_balance[chat_id] = 20000
+def start(msg):
+    user_id = msg.from_user.id
+    if user_id not in user_balance:
+        user_balance[user_id] = 0
 
-    if chat_id == ADMIN_ID:
-        bot.send_message(chat_id, "👑 Admin sifatida kirdingiz", reply_markup=admin_menu())
-    else:
-        bot.send_message(chat_id, "Tanlang:", reply_markup=user_menu())
+    bot.send_message(msg.chat.id, "🚀 Xush kelibsiz!", reply_markup=menu())
 
-# BALANS
+# 💰 BALANS
 @bot.message_handler(func=lambda m: m.text == "💰 Balans")
-def balans(message):
-    bot.send_message(message.chat.id, f"💰 Balans: {user_balance.get(message.chat.id,0)} so'm")
+def balans(msg):
+    user_id = msg.from_user.id
+    bal = user_balance.get(user_id, 0)
+    bot.send_message(msg.chat.id, f"💰 Sizning balans: {bal} so‘m")
 
-# PUL QO‘SHISH (USER TEST)
-@bot.message_handler(func=lambda m: m.text == "➕ Pul qo'shish")
-def add_money(message):
-    user_balance[message.chat.id] += 10000
-    bot.send_message(message.chat.id, "✅ 10000 so'm qo'shildi")
+# ➕ PUL QO‘SHISH (test)
+@bot.message_handler(func=lambda m: m.text == "➕ Pul qo‘shish")
+def add_money(msg):
+    user_id = msg.from_user.id
+    user_balance[user_id] = user_balance.get(user_id, 0) + 5000
 
-# SKUTER OLISH
+    bot.send_message(msg.chat.id,
+        f"""✅ 5000 so‘m qo‘shildi
+💰 Balans: {user_balance[user_id]}
+
+💳 Real to‘lov uchun:
+{KARTA}""")
+
+# 🛴 SKUTER OLISH
 @bot.message_handler(func=lambda m: m.text == "🛴 Skuter olish")
-def skuter_olish(message):
-    bot.send_message(message.chat.id, "🔑 Skuter kodini kiriting:")
-    user_states[message.chat.id] = "waiting_code"
+def skuter_olish(msg):
+    user_id = msg.from_user.id
 
-# KOD TEKSHIRISH
-@bot.message_handler(func=lambda message: True, content_types=['text'])
-def check_code(message):
-    chat_id = message.chat.id
+    if user_balance.get(user_id, 0) < SKUTER_PRICE:
+        bot.send_message(msg.chat.id,
+        f"""❌ Balans yetarli emas!
 
-    if user_states.get(chat_id) == "waiting_code":
-        if message.text == user_code:
-            bot.send_message(chat_id, "✅ Skuter ochildi!")
-            user_states[chat_id] = None
-        else:
-            bot.send_message(chat_id, "❌ Noto‘g‘ri kod!")
-
-# HAYDASHNI TUGATISH
-@bot.message_handler(func=lambda m: m.text == "❌ Haydashni tugatish")
-def stop_ride(message):
-    bot.send_message(message.chat.id, "📸 Skuter rasmini yuboring:")
-    user_states[message.chat.id] = "waiting_photo"
-
-# RASM QABUL QILISH
-@bot.message_handler(content_types=['photo'])
-def get_photo(message):
-    if user_states.get(message.chat.id) == "waiting_photo":
-        bot.send_message(message.chat.id, "✅ Skuter yopildi. Rahmat!")
-        user_states[message.chat.id] = None
-
-# ================= ADMIN PANEL =================
-
-# ADMIN PANELGA KIRISH
-@bot.message_handler(func=lambda m: m.text == "👑 Admin panel")
-def admin_panel(message):
-    if message.chat.id != ADMIN_ID:
-        bot.send_message(message.chat.id, "❌ Siz admin emassiz!")
-        return
-
-    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("💸 Pul berish", "📊 Statistika")
-    markup.add("🔙 Orqaga")
-
-    bot.send_message(message.chat.id, "👑 Admin panel:", reply_markup=markup)
-
-# ORQAGA
-@bot.message_handler(func=lambda m: m.text == "🔙 Orqaga")
-def back(message):
-    if message.chat.id == ADMIN_ID:
-        bot.send_message(message.chat.id, "🔙 Asosiy menyu", reply_markup=admin_menu())
+💳 Karta:
+{KARTA}""")
     else:
-        bot.send_message(message.chat.id, "🔙 Asosiy menyu", reply_markup=user_menu())
+        user_state[user_id] = "kod"
+        bot.send_message(msg.chat.id, "🔑 Skuter kodini kiriting:")
 
-# PUL BERISH BOSHLASH
-@bot.message_handler(func=lambda m: m.text == "💸 Pul berish")
-def give_money(message):
-    if message.chat.id != ADMIN_ID:
+# 🔄 REAL TIME RIDE
+def ride_worker(user_id, chat_id):
+    while True:
+        time.sleep(60)
+
+        if user_id not in ride_data or not ride_data[user_id]["active"]:
+            break
+
+        user_balance[user_id] -= PRICE_PER_MIN
+
+        if user_balance[user_id] <= 0:
+            ride_data[user_id]["active"] = False
+
+            bot.send_message(chat_id,
+            "❌ Balans tugadi!\n🛑 Skuter avtomatik yopildi")
+
+            break
+
+# 🔑 KOD KIRITISH
+@bot.message_handler(func=lambda m: True)
+def handle_all(msg):
+    user_id = msg.from_user.id
+    chat_id = msg.chat.id
+    text = msg.text
+
+    if user_state.get(user_id) == "kod":
+        if text == "1234":
+            user_balance[user_id] -= SKUTER_PRICE
+
+            ride_data[user_id] = {"active": True}
+
+            threading.Thread(target=ride_worker, args=(user_id, chat_id)).start()
+
+            user_state[user_id] = None
+
+            bot.send_message(chat_id,
+            f"""✅ Skuter ochildi! 🛴
+
+💰 Balans: {user_balance[user_id]}
+⛔ Tugatish: "Skuter yopish" """)
+        else:
+            bot.send_message(chat_id, "❌ Kod noto‘g‘ri!")
+
+# 🛑 SKUTER YOPISH
+@bot.message_handler(func=lambda m: m.text == "🛑 Skuter yopish")
+def stop(msg):
+    user_id = msg.from_user.id
+
+    if user_id not in ride_data or not ride_data[user_id]["active"]:
+        bot.send_message(msg.chat.id, "❗ Siz minmayapsiz")
         return
 
-    bot.send_message(message.chat.id, "User ID va summa yuboring:\nMasalan: 123456789 10000")
-    user_states[message.chat.id] = "admin_give_money"
+    ride_data[user_id]["active"] = False
 
-# PUL BERISH AMALGA OSHIRISH
-@bot.message_handler(func=lambda message: user_states.get(message.chat.id) == "admin_give_money")
-def process_give_money(message):
-    try:
-        user_id, amount = map(int, message.text.split())
-        user_balance[user_id] = user_balance.get(user_id, 0) + amount
+    bot.send_message(msg.chat.id,
+    f"""🛑 Skuter yopildi!
 
-        bot.send_message(message.chat.id, "✅ Pul berildi")
-        bot.send_message(user_id, f"💰 Sizga {amount} so'm berildi")
+💰 Qoldiq: {user_balance[user_id]} so‘m""")
 
-    except:
-        bot.send_message(message.chat.id, "❌ Xato format!")
-
-    user_states[message.chat.id] = None
-
-# STATISTIKA
-@bot.message_handler(func=lambda m: m.text == "📊 Statistika")
-def stats(message):
-    if message.chat.id != ADMIN_ID:
-        return
-
-    total_users = len(user_balance)
-    bot.send_message(message.chat.id, f"👥 Foydalanuvchilar soni: {total_users}")
-
-# =================================================
-
+# ▶️ BOTNI ISHGA TUSHIRISH
 bot.infinity_polling()
