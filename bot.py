@@ -1,226 +1,93 @@
 import telebot
-from telebot.types import ReplyKeyboardMarkup
-import sqlite3, time, threading, base64, os
-from dotenv import load_dotenv
-from openai import OpenAI
-
-# 🔐 ENV yuklash
-load_dotenv()
-OPENAI_KEY = os.getenv("OPENAI_KEY")
-
-if not OPENAI_KEY:
-    raise Exception("OPENAI_KEY topilmadi (.env tekshir)")
-
-client = OpenAI(api_key=OPENAI_KEY)
+import time
+import threading
 
 TOKEN = "8110986517:AAG3DL1iUHgPv1Zk0mp51p-UB5mrhEsl4M8"
+ADMIN_CODE = "1234"
+PRICE_PER_MINUTE = 500
+
 bot = telebot.TeleBot(TOKEN)
 
-# DB
-conn = sqlite3.connect("skuter.db", check_same_thread=False)
-cursor = conn.cursor()
-cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, balance INTEGER)")
-cursor.execute("CREATE TABLE IF NOT EXISTS rides (user_id INTEGER, active INTEGER)")
-cursor.execute("CREATE TABLE IF NOT EXISTS skuters (skuter_id TEXT PRIMARY KEY, code TEXT, status TEXT, lat REAL, lon REAL)")
-conn.commit()
-
-SKUTER_PRICE = 5000
-PRICE_PER_MIN = 500
-
-ride_data = {}
-waiting_photo = {}
-
-# MENU
-def menu():
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("🛴 Skuter olish", "🛑 Skuter yopish")
-    kb.add("📍 Skuterlar")
-    kb.add("➕ Pul qo‘shish", "💰 Balans")
-    return kb
-
-# BALANS
-def get_balance(uid):
-    cursor.execute("SELECT balance FROM users WHERE user_id=?", (uid,))
-    r = cursor.fetchone()
-    if r: return r[0]
-    cursor.execute("INSERT INTO users VALUES (?,0)", (uid,))
-    conn.commit()
-    return 0
-
-def update_balance(uid, amount):
-    bal = get_balance(uid) + amount
-    cursor.execute("UPDATE users SET balance=? WHERE user_id=?", (bal, uid))
-    conn.commit()
-    return bal
-
-# RIDE
-def start_ride_db(uid):
-    cursor.execute("DELETE FROM rides WHERE user_id=?", (uid,))
-    cursor.execute("INSERT INTO rides VALUES (?,1)", (uid,))
-    conn.commit()
-
-def stop_ride_db(uid):
-    cursor.execute("UPDATE rides SET active=0 WHERE user_id=?", (uid,))
-    conn.commit()
-
-def is_riding(uid):
-    cursor.execute("SELECT active FROM rides WHERE user_id=?", (uid,))
-    r = cursor.fetchone()
-    return r and r[0] == 1
-
-# SKUTER
-def add_skuter(sid, code, lat, lon):
-    cursor.execute("INSERT OR IGNORE INTO skuters VALUES (?,?,?,?,?)", (sid, code, "free", lat, lon))
-    conn.commit()
-
-def get_skuter_by_code(code):
-    cursor.execute("SELECT skuter_id, status FROM skuters WHERE code=?", (code,))
-    return cursor.fetchone()
-
-def set_skuter_status(sid, st):
-    cursor.execute("UPDATE skuters SET status=? WHERE skuter_id=?", (st, sid))
-    conn.commit()
-
-def get_all_skuters():
-    cursor.execute("SELECT skuter_id, status, lat, lon FROM skuters")
-    return cursor.fetchall()
-
-# 🤖 AI CHECK
-def ai_check(image_base64):
-    try:
-        resp = client.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": "Bu rasmda elektr skuter bormi? faqat yes yoki no"},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
-                ]
-            }]
-        )
-        return "yes" in resp.choices[0].message.content.lower()
-    except Exception as e:
-        print("AI error:", e)
-        return False
-
-# ⏱ REALTIME
-def ride_worker(uid, chat_id):
-    bot.send_message(chat_id, "🚀 Skuter harakatda!")
-    while True:
-        time.sleep(10)  # test (keyin 60 qil)
-        if not is_riding(uid):
-            break
-
-        bal = get_balance(uid)
-        new_bal = bal - PRICE_PER_MIN
-
-        if new_bal <= 0:
-            stop_ride_db(uid)
-            cursor.execute("UPDATE users SET balance=0 WHERE user_id=?", (uid,))
-            conn.commit()
-            sid = ride_data[uid]["skuter_id"]
-            set_skuter_status(sid, "free")
-            bot.send_message(chat_id, "❌ Balans tugadi!\n🛑 Skuter yopildi")
-            break
-        else:
-            cursor.execute("UPDATE users SET balance=? WHERE user_id=?", (new_bal, uid))
-            conn.commit()
-            bot.send_message(chat_id, f"⏱ -{PRICE_PER_MIN}\n💰 {new_bal}")
+user_step = {}
+user_balance = {}
+user_time = {}
+active_users = {}
 
 # START
 @bot.message_handler(commands=['start'])
-def start(msg):
-    get_balance(msg.from_user.id)
-    bot.send_message(msg.chat.id, "🚀 Xush kelibsiz", reply_markup=menu())
+def start(message):
+    chat_id = message.chat.id
+
+    if chat_id not in user_balance:
+        user_balance[chat_id] = 5000  # boshlang'ich balans
+
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("🛴 Skuterni ochish", "🔒 Skuterni yopish", "💰 Balans")
+
+    bot.send_message(chat_id, "Kerakli bo'limni tanlang:", reply_markup=markup)
 
 # BALANS
 @bot.message_handler(func=lambda m: m.text == "💰 Balans")
-def bal(msg):
-    bot.send_message(msg.chat.id, f"💰 {get_balance(msg.from_user.id)}")
+def balans(message):
+    bot.send_message(message.chat.id, f"Sizning balans: {user_balance[message.chat.id]} so'm")
 
-# PUL
-@bot.message_handler(func=lambda m: m.text == "➕ Pul qo‘shish")
-def pul(msg):
-    b = update_balance(msg.from_user.id, 5000)
-    bot.send_message(msg.chat.id, f"✅ +5000\n💰 {b}")
+# SKUTER OCHISH
+@bot.message_handler(func=lambda m: m.text == "🛴 Skuterni ochish")
+def open_scooter(message):
+    user_step[message.chat.id] = "kod"
+    bot.send_message(message.chat.id, "Kod kiriting:")
 
-# XARITA
-@bot.message_handler(func=lambda m: m.text == "📍 Skuterlar")
-def map_(msg):
-    for s in get_all_skuters():
-        sid, st, lat, lon = s
-        txt = "🟢 Bo‘sh" if st=="free" else "🔴 Band"
-        bot.send_location(msg.chat.id, lat, lon)
-        bot.send_message(msg.chat.id, f"{sid}\n{txt}")
+# KOD TEKSHIRISH
+@bot.message_handler(func=lambda m: user_step.get(m.chat.id) == "kod")
+def check_code(message):
+    chat_id = message.chat.id
 
-# OLISH
-@bot.message_handler(func=lambda m: m.text == "🛴 Skuter olish")
-def olish(msg):
-    bot.send_message(msg.chat.id, "Kod kiriting yoki QR")
+    if message.text == ADMIN_CODE:
+        if user_balance.get(chat_id, 0) < PRICE_PER_MINUTE:
+            bot.send_message(chat_id, "❌ Balans yetarli emas!")
+            return
 
-# YOPISH (FIX + FOTO)
-@bot.message_handler(func=lambda m: m.text == "🛑 Skuter yopish")
-def stop(msg):
-    uid = msg.from_user.id
-    if not is_riding(uid):
-        bot.send_message(msg.chat.id, "❗ Minmayapsiz")
-        return
+        bot.send_message(chat_id, "✅ Skuter ochildi!")
+        user_step[chat_id] = None
+        active_users[chat_id] = True
 
-    sid = ride_data[uid]["skuter_id"]
-    stop_ride_db(uid)
-    set_skuter_status(sid, "free")
+        # vaqtni boshlash
+        threading.Thread(target=start_timer, args=(chat_id,)).start()
+    else:
+        bot.send_message(chat_id, "❌ Noto‘g‘ri kod!")
 
-    waiting_photo[uid] = sid
-    bot.send_message(msg.chat.id, f"🛑 {sid} yopildi\n📸 Rasm yuboring")
+# TIMER
+def start_timer(chat_id):
+    while active_users.get(chat_id):
+        time.sleep(60)
 
-# FOTO + AI
-@bot.message_handler(content_types=['photo'])
-def photo(msg):
-    uid = msg.from_user.id
-    if uid in waiting_photo:
-        sid = waiting_photo[uid]
-        bot.send_message(msg.chat.id, "🤖 Tekshiryapman...")
-
-        file = bot.get_file(msg.photo[-1].file_id)
-        data = bot.download_file(file.file_path)
-        img = base64.b64encode(data).decode()
-
-        if ai_check(img):
-            bot.send_message(msg.chat.id, f"✅ AI tasdiqladi\n🛴 {sid}")
-            del waiting_photo[uid]
+        if user_balance[chat_id] >= PRICE_PER_MINUTE:
+            user_balance[chat_id] -= PRICE_PER_MINUTE
+            bot.send_message(chat_id, f"⏱ 1 minut o'tdi. -500 so'm\nQoldiq: {user_balance[chat_id]}")
         else:
-            bot.send_message(msg.chat.id, "❌ Noto‘g‘ri rasm, qayta yubor")
+            bot.send_message(chat_id, "❌ Pul tugadi! Skuter yopildi.")
+            active_users[chat_id] = False
+            break
 
-# HANDLE (oxirida)
-@bot.message_handler(func=lambda m: True)
-def handle(msg):
-    uid = msg.from_user.id
-    chat_id = msg.chat.id
-    text = msg.text
+# SKUTER YOPISH
+@bot.message_handler(func=lambda m: m.text == "🔒 Skuterni yopish")
+def close_scooter(message):
+    chat_id = message.chat.id
+    active_users[chat_id] = False
+    user_step[chat_id] = "rasm"
+    bot.send_message(chat_id, "Rasm yuboring:")
 
-    sk = get_skuter_by_code(text)
-    if sk:
-        sid, st = sk
-        if st != "free":
-            bot.send_message(chat_id, "❌ Band")
-            return
-        if get_balance(uid) < SKUTER_PRICE:
-            bot.send_message(chat_id, "❌ Pul yo‘q")
-            return
+# RASM
+@bot.message_handler(content_types=['photo'])
+def photo(message):
+    chat_id = message.chat.id
+    if user_step.get(chat_id) == "rasm":
+        bot.send_message(chat_id, "📸 Rasm qabul qilindi. Skuter yopildi ✅")
+        user_step[chat_id] = None
 
-        update_balance(uid, -SKUTER_PRICE)
-        start_ride_db(uid)
-        set_skuter_status(sid, "busy")
+# DEFAULT
+@bot.message_handler(func=lambda message: True)
+def echo(message):
+    bot.send_message(message.chat.id, "Menyudan foydalaning ⬇️")
 
-        ride_data[uid] = {"skuter_id": sid}
-        threading.Thread(target=ride_worker, args=(uid, chat_id), daemon=True).start()
-
-        bot.send_message(chat_id, f"✅ {sid} ochildi\n🚀 Ishga tushdi\n💰 {get_balance(uid)}")
-
-# SKUTERLAR
-add_skuter("SKUTER_1", "A123", 41.3111, 69.2797)
-add_skuter("SKUTER_2", "B456", 41.3125, 69.2810)
-add_skuter("SKUTER_3", "C789", 41.3130, 69.2750)
-
-print("BOT STARTED")
-bot.infinity_polling()
+bot.polling()
