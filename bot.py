@@ -7,7 +7,7 @@ import base64
 from openai import OpenAI
 
 TOKEN = "8110986517:AAG3DL1iUHgPv1Zk0mp51p-UB5mrhEsl4M8"
-OPENAI_KEY = "API_KEYING"
+OPENAI_KEY = "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"
 
 bot = telebot.TeleBot(TOKEN)
 client = OpenAI(api_key=OPENAI_KEY)
