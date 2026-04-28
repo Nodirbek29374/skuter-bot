@@ -3,9 +3,14 @@ from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 import sqlite3
 import time
 import threading
+import base64
+from openai import OpenAI
 
 TOKEN = "8110986517:AAG3DL1iUHgPv1Zk0mp51p-UB5mrhEsl4M8"
+OPENAI_KEY = "API_KEYING"
+
 bot = telebot.TeleBot(TOKEN)
+client = OpenAI(api_key=OPENAI_KEY)
 
 # DATABASE
 conn = sqlite3.connect("skuter.db", check_same_thread=False)
@@ -16,9 +21,13 @@ cursor.execute("CREATE TABLE IF NOT EXISTS rides (user_id INTEGER, active INTEGE
 cursor.execute("CREATE TABLE IF NOT EXISTS skuters (skuter_id TEXT PRIMARY KEY, code TEXT, status TEXT, lat REAL, lon REAL)")
 conn.commit()
 
+# SETTINGS
 SKUTER_PRICE = 5000
 PRICE_PER_MIN = 500
 KARTA = "8600 1234 5678 9012"
+
+ride_data = {}
+waiting_photo = {}
 
 # MENU
 def menu():
@@ -76,15 +85,31 @@ def get_all_skuters():
     cursor.execute("SELECT skuter_id, status, lat, lon FROM skuters")
     return cursor.fetchall()
 
-# REALTIME
-ride_data = {}
+# AI CHECK
+def ai_check(image_base64):
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Bu rasmda elektr skuter bormi? faqat yes yoki no"},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
+                    ]
+                }
+            ]
+        )
+        return "yes" in response.choices[0].message.content.lower()
+    except:
+        return False
 
+# REALTIME
 def ride_worker(user_id, chat_id):
-    print("START RIDE")
     bot.send_message(chat_id, "🚀 Skuter harakatda!")
 
     while True:
-        time.sleep(10)  # TEST (keyin 60 qil)
+        time.sleep(10)  # test
 
         if not is_riding(user_id):
             break
@@ -106,40 +131,78 @@ def ride_worker(user_id, chat_id):
             cursor.execute("UPDATE users SET balance=? WHERE user_id=?", (new_bal, user_id))
             conn.commit()
 
-            bot.send_message(chat_id, f"⏱ -{PRICE_PER_MIN} so‘m\n💰 Qoldiq: {new_bal}")
+            bot.send_message(chat_id, f"⏱ -{PRICE_PER_MIN}\n💰 {new_bal}")
 
 # START
 @bot.message_handler(commands=['start'])
 def start(msg):
     get_balance(msg.from_user.id)
-    bot.send_message(msg.chat.id, "🚀 Xush kelibsiz!", reply_markup=menu())
+    bot.send_message(msg.chat.id, "🚀 Xush kelibsiz", reply_markup=menu())
 
 # BALANS
 @bot.message_handler(func=lambda m: m.text == "💰 Balans")
-def balans(msg):
-    bot.send_message(msg.chat.id, f"💰 Balans: {get_balance(msg.from_user.id)}")
+def bal(msg):
+    bot.send_message(msg.chat.id, f"💰 {get_balance(msg.from_user.id)}")
 
 # PUL
 @bot.message_handler(func=lambda m: m.text == "➕ Pul qo‘shish")
-def add_money(msg):
+def pul(msg):
     bal = update_balance(msg.from_user.id, 5000)
-    bot.send_message(msg.chat.id, f"✅ 5000 qo‘shildi\n💰 {bal}\n💳 {KARTA}")
+    bot.send_message(msg.chat.id, f"✅ +5000\n💰 {bal}")
 
 # XARITA
 @bot.message_handler(func=lambda m: m.text == "📍 Skuterlar")
-def show_map(msg):
+def map(msg):
     for s in get_all_skuters():
         skuter_id, status, lat, lon = s
-        status_text = "🟢 Bo‘sh" if status == "free" else "🔴 Band"
+        txt = "🟢 Bo‘sh" if status=="free" else "🔴 Band"
         bot.send_location(msg.chat.id, lat, lon)
-        bot.send_message(msg.chat.id, f"{skuter_id}\n{status_text}")
+        bot.send_message(msg.chat.id, f"{skuter_id}\n{txt}")
 
 # OLISH
 @bot.message_handler(func=lambda m: m.text == "🛴 Skuter olish")
-def skuter(msg):
-    bot.send_message(msg.chat.id, "📸 QR skaner yoki kod yoz")
+def olish(msg):
+    bot.send_message(msg.chat.id, "Kod kiriting yoki QR")
 
-# HANDLE
+# YOPISH (FIX)
+@bot.message_handler(func=lambda m: m.text == "🛑 Skuter yopish")
+def stop(msg):
+    user_id = msg.from_user.id
+
+    if not is_riding(user_id):
+        bot.send_message(msg.chat.id, "❗ Minmayapsiz")
+        return
+
+    skuter_id = ride_data[user_id]["skuter_id"]
+
+    stop_ride_db(user_id)
+    set_skuter_status(skuter_id, "free")
+
+    waiting_photo[user_id] = skuter_id
+
+    bot.send_message(msg.chat.id, f"🛑 {skuter_id} yopildi\n📸 Rasm yuboring")
+
+# PHOTO + AI
+@bot.message_handler(content_types=['photo'])
+def photo(msg):
+    user_id = msg.from_user.id
+
+    if user_id in waiting_photo:
+        skuter_id = waiting_photo[user_id]
+
+        bot.send_message(msg.chat.id, "🤖 Tekshiryapman...")
+
+        file = bot.get_file(msg.photo[-1].file_id)
+        data = bot.download_file(file.file_path)
+        img = base64.b64encode(data).decode()
+
+        if ai_check(img):
+            bot.send_message(msg.chat.id, f"✅ AI tasdiqladi\n🛴 {skuter_id}")
+            del waiting_photo[user_id]
+        else:
+            bot.send_message(msg.chat.id, "❌ Noto‘g‘ri rasm")
+
+# HANDLE (ENG OXIRIDA)
 @bot.message_handler(func=lambda m: True)
 def handle(msg):
     user_id = msg.from_user.id
@@ -156,7 +219,7 @@ def handle(msg):
             return
 
         if get_balance(user_id) < SKUTER_PRICE:
-            bot.send_message(chat_id, f"❌ Pul yo‘q\n💳 {KARTA}")
+            bot.send_message(chat_id, "❌ Pul yo‘q")
             return
 
         update_balance(user_id, -SKUTER_PRICE)
@@ -168,30 +231,10 @@ def handle(msg):
         threading.Thread(target=ride_worker, args=(user_id, chat_id), daemon=True).start()
 
         bot.send_message(chat_id,
-        f"""✅ {skuter_id} ochildi! 🛴
+        f"""✅ {skuter_id} ochildi
 
-🚀 Skuter ishga tushdi
-⏱ Hisob boshlandi
-
-💰 Balans: {get_balance(user_id)}
-⛔ "Skuter yopish"
-""")
-
-# STOP
-@bot.message_handler(func=lambda m: m.text == "🛑 Skuter yopish")
-def stop(msg):
-    user_id = msg.from_user.id
-
-    if not is_riding(user_id):
-        bot.send_message(msg.chat.id, "❗ Minmayapsiz")
-        return
-
-    skuter_id = ride_data[user_id]["skuter_id"]
-
-    stop_ride_db(user_id)
-    set_skuter_status(skuter_id, "free")
-
-    bot.send_message(msg.chat.id, f"🛑 {skuter_id} yopildi\n💰 {get_balance(user_id)}")
+🚀 Ishga tushdi
+💰 {get_balance(user_id)}""")
 
 # SKUTERLAR
 add_skuter("SKUTER_1", "A123", 41.3111, 69.2797)
