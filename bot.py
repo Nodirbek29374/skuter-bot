@@ -4,7 +4,6 @@ from telebot import types
 TOKEN = "8110986517:AAG3DL1iUHgPv1Zk0mp51p-UB5mrhEsl4M8"
 bot = telebot.TeleBot(TOKEN)
 
-# START
 @bot.message_handler(commands=['start'])
 def start(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -25,39 +24,31 @@ def start(message):
 # BALANS
 @bot.message_handler(func=lambda m: m.text == "💰 Balans")
 def balans(message):
-    bot.send_message(message.chat.id, "Sizning balansingiz: 10 000 so‘m 💵")
+    bot.send_message(message.chat.id, "Sizning balansingiz: 10 000 so‘m")
 
-
-# PUL QO‘SHISH
+# PUL QO‘SHISH (MUAMMO SHU YERDA EDI)
 @bot.message_handler(func=lambda m: m.text == "+ Pul qo‘shish")
-def pul(message):
-    bot.send_message(message.chat.id, "💳 To‘lov uchun Click / Payme ishlating")
-
+def pul_qoshish(message):
+    bot.send_message(message.chat.id, "To‘lov uchun: Click / Payme orqali to‘lang")
 
 # SKUTER OLISH
 @bot.message_handler(func=lambda m: m.text == "🛴 Skuter olish")
 def skuter(message):
-    bot.send_message(message.chat.id, "🛴 Skuter ochildi! Yaxshi haydash!")
-
+    bot.send_message(message.chat.id, "Skuter ochildi 🚀")
 
 # TO‘XTATISH
 @bot.message_handler(func=lambda m: m.text == "❌ Haydashni tugatish")
 def stop(message):
-    bot.send_message(message.chat.id, "🛑 Haydash tugatildi")
+    bot.send_message(message.chat.id, "Haydash tugatildi 🛑")
 
-
-# XARITA (LOKATSIYA)
+# LOKATSIYA
 @bot.message_handler(content_types=['location'])
-def location(message):
-    lat = message.location.latitude
-    lon = message.location.longitude
+def loc(message):
+    bot.send_message(message.chat.id, "Siz xarita yubordingiz 📍")
 
-    bot.send_message(message.chat.id, f"📍 Sizning joylashuv:\n{lat}, {lon}")
-
-
-# DEFAULT (ortiqcha xabarlar uchun)
+# DEFAULT (faqat noma’lum text uchun)
 @bot.message_handler(func=lambda m: True)
 def other(message):
-    bot.send_message(message.chat.id, "❗ Iltimos pastdagi tugmalardan foydalaning")
+    bot.send_message(message.chat.id, "Admin bilan bog‘laning")
 
 bot.polling()
