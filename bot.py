@@ -1,7 +1,7 @@
 import telebot
 from telebot import types
 
-TOKEN = "SENING_TOKENING"
+TOKEN = "8110986517:AAG3DL1iUHgPv1Zk0mp51p-UB5mrhEsl4M8"
 bot = telebot.TeleBot(TOKEN)
 
 # START
