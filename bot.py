@@ -1,15 +1,41 @@
 import telebot
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton
+import sqlite3
 import time
 import threading
 
 TOKEN = "8110986517:AAG3DL1iUHgPv1Zk0mp51p-UB5mrhEsl4M8"
 bot = telebot.TeleBot(TOKEN)
 
-user_balance = {}
-user_state = {}
-ride_data = {}
+# 🧠 DATABASE
+conn = sqlite3.connect("skuter.db", check_same_thread=False)
+cursor = conn.cursor()
 
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    balance INTEGER
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS rides (
+    user_id INTEGER,
+    active INTEGER
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS skuters (
+    skuter_id TEXT PRIMARY KEY,
+    code TEXT,
+    status TEXT
+)
+""")
+
+conn.commit()
+
+# ⚙️ SETTINGS
 SKUTER_PRICE = 5000
 PRICE_PER_MIN = 500
 KARTA = "4023060516859138"
@@ -23,108 +49,171 @@ def menu():
     kb.add(KeyboardButton("💰 Balans"))
     return kb
 
+# 💰 BALANS
+def get_balance(user_id):
+    cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
+    row = cursor.fetchone()
+
+    if row:
+        return row[0]
+    else:
+        cursor.execute("INSERT INTO users VALUES (?, ?)", (user_id, 0))
+        conn.commit()
+        return 0
+
+def update_balance(user_id, amount):
+    bal = get_balance(user_id) + amount
+    cursor.execute("UPDATE users SET balance=? WHERE user_id=?", (bal, user_id))
+    conn.commit()
+    return bal
+
+# 🛴 RIDE
+def start_ride_db(user_id):
+    cursor.execute("DELETE FROM rides WHERE user_id=?", (user_id,))
+    cursor.execute("INSERT INTO rides VALUES (?, ?)", (user_id, 1))
+    conn.commit()
+
+def stop_ride_db(user_id):
+    cursor.execute("UPDATE rides SET active=0 WHERE user_id=?", (user_id,))
+    conn.commit()
+
+def is_riding(user_id):
+    cursor.execute("SELECT active FROM rides WHERE user_id=?", (user_id,))
+    row = cursor.fetchone()
+    return row and row[0] == 1
+
+# 🛴 SKUTER
+def add_skuter(skuter_id, code):
+    cursor.execute(
+        "INSERT OR IGNORE INTO skuters VALUES (?, ?, ?)",
+        (skuter_id, code, "free")
+    )
+    conn.commit()
+
+def get_skuter_by_code(code):
+    cursor.execute("SELECT skuter_id, status FROM skuters WHERE code=?", (code,))
+    return cursor.fetchone()
+
+def set_skuter_status(skuter_id, status):
+    cursor.execute("UPDATE skuters SET status=? WHERE skuter_id=?", (status, skuter_id))
+    conn.commit()
+
+# 🚀 REALTIME
+ride_data = {}
+
+def ride_worker(user_id, chat_id):
+    while True:
+        time.sleep(60)
+
+        if not is_riding(user_id):
+            break
+
+        bal = get_balance(user_id) - PRICE_PER_MIN
+
+        if bal <= 0:
+            stop_ride_db(user_id)
+            cursor.execute("UPDATE users SET balance=0 WHERE user_id=?", (user_id,))
+            conn.commit()
+
+            skuter_id = ride_data[user_id]["skuter_id"]
+            set_skuter_status(skuter_id, "free")
+
+            bot.send_message(chat_id, "❌ Balans tugadi!\n🛑 Skuter yopildi")
+            break
+        else:
+            cursor.execute("UPDATE users SET balance=? WHERE user_id=?", (bal, user_id))
+            conn.commit()
+
 # 🚀 START
 @bot.message_handler(commands=['start'])
 def start(msg):
-    user_id = msg.from_user.id
-    if user_id not in user_balance:
-        user_balance[user_id] = 0
-
+    get_balance(msg.from_user.id)
     bot.send_message(msg.chat.id, "🚀 Xush kelibsiz!", reply_markup=menu())
 
 # 💰 BALANS
 @bot.message_handler(func=lambda m: m.text == "💰 Balans")
 def balans(msg):
-    user_id = msg.from_user.id
-    bal = user_balance.get(user_id, 0)
-    bot.send_message(msg.chat.id, f"💰 Sizning balans: {bal} so‘m")
+    bot.send_message(msg.chat.id, f"💰 Balans: {get_balance(msg.from_user.id)} so‘m")
 
-# ➕ PUL QO‘SHISH (test)
+# ➕ PUL
 @bot.message_handler(func=lambda m: m.text == "➕ Pul qo‘shish")
 def add_money(msg):
-    user_id = msg.from_user.id
-    user_balance[user_id] = user_balance.get(user_id, 0) + 5000
-
+    bal = update_balance(msg.from_user.id, 5000)
     bot.send_message(msg.chat.id,
-        f"""✅ 5000 so‘m qo‘shildi
-💰 Balans: {user_balance[user_id]}
+    f"""✅ 5000 so‘m qo‘shildi
+💰 Balans: {bal}
 
-💳 Real to‘lov uchun:
+💳 To‘lov:
 {KARTA}""")
 
 # 🛴 SKUTER OLISH
 @bot.message_handler(func=lambda m: m.text == "🛴 Skuter olish")
-def skuter_olish(msg):
-    user_id = msg.from_user.id
+def skuter(msg):
+    bot.send_message(msg.chat.id, "📸 QR skaner qiling yoki kodni kiriting:")
 
-    if user_balance.get(user_id, 0) < SKUTER_PRICE:
-        bot.send_message(msg.chat.id,
-        f"""❌ Balans yetarli emas!
-
-💳 Karta:
-{KARTA}""")
-    else:
-        user_state[user_id] = "kod"
-        bot.send_message(msg.chat.id, "🔑 Skuter kodini kiriting:")
-
-# 🔄 REAL TIME RIDE
-def ride_worker(user_id, chat_id):
-    while True:
-        time.sleep(60)
-
-        if user_id not in ride_data or not ride_data[user_id]["active"]:
-            break
-
-        user_balance[user_id] -= PRICE_PER_MIN
-
-        if user_balance[user_id] <= 0:
-            ride_data[user_id]["active"] = False
-
-            bot.send_message(chat_id,
-            "❌ Balans tugadi!\n🛑 Skuter avtomatik yopildi")
-
-            break
-
-# 🔑 KOD KIRITISH
+# 🔑 ASOSIY LOGIKA
 @bot.message_handler(func=lambda m: True)
-def handle_all(msg):
+def handle(msg):
     user_id = msg.from_user.id
     chat_id = msg.chat.id
     text = msg.text
 
-    if user_state.get(user_id) == "kod":
-        if text == "1234":
-            user_balance[user_id] -= SKUTER_PRICE
+    skuter = get_skuter_by_code(text)
 
-            ride_data[user_id] = {"active": True}
+    if skuter:
+        skuter_id, status = skuter
 
-            threading.Thread(target=ride_worker, args=(user_id, chat_id)).start()
+        if status != "free":
+            bot.send_message(chat_id, "❌ Bu skuter band!")
+            return
 
-            user_state[user_id] = None
+        bal = get_balance(user_id)
 
+        if bal < SKUTER_PRICE:
             bot.send_message(chat_id,
-            f"""✅ Skuter ochildi! 🛴
+            f"""❌ Balans yetarli emas!
 
-💰 Balans: {user_balance[user_id]}
+💳 Karta:
+{KARTA}""")
+            return
+
+        update_balance(user_id, -SKUTER_PRICE)
+        start_ride_db(user_id)
+        set_skuter_status(skuter_id, "busy")
+
+        ride_data[user_id] = {"skuter_id": skuter_id}
+
+        threading.Thread(target=ride_worker, args=(user_id, chat_id)).start()
+
+        bot.send_message(chat_id,
+        f"""✅ {skuter_id} ochildi! 🛴
+
+💰 Balans: {get_balance(user_id)}
 ⛔ Tugatish: "Skuter yopish" """)
-        else:
-            bot.send_message(chat_id, "❌ Kod noto‘g‘ri!")
 
-# 🛑 SKUTER YOPISH
+# 🛑 YOPISH
 @bot.message_handler(func=lambda m: m.text == "🛑 Skuter yopish")
 def stop(msg):
     user_id = msg.from_user.id
 
-    if user_id not in ride_data or not ride_data[user_id]["active"]:
+    if not is_riding(user_id):
         bot.send_message(msg.chat.id, "❗ Siz minmayapsiz")
         return
 
-    ride_data[user_id]["active"] = False
+    skuter_id = ride_data[user_id]["skuter_id"]
+
+    stop_ride_db(user_id)
+    set_skuter_status(skuter_id, "free")
 
     bot.send_message(msg.chat.id,
-    f"""🛑 Skuter yopildi!
+    f"""🛑 {skuter_id} yopildi!
 
-💰 Qoldiq: {user_balance[user_id]} so‘m""")
+💰 Qoldiq: {get_balance(user_id)} so‘m""")
 
-# ▶️ BOTNI ISHGA TUSHIRISH
-bot.infinity_polling()
+# ▶️ SKUTERLARNI OLDINDAN QO‘SH (1 MARTA)
+add_skuter("SKUTER_1", "1")
+add_skuter("SKUTER_2", "2")
+add_skuter("SKUTER_3", "3")
+
+# ▶️ RUN
+bot.infinity_polling()        
